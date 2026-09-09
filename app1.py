@@ -26,23 +26,32 @@ logger = logging.getLogger("legal_metrology")
 
 os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 
-# Safe Imports for OCR libraries
-try:
-    from paddleocr import PaddleOCR
-except ImportError:
-    PaddleOCR = None
+# Opt-in flag for lightweight deploys (Render/Docker): set ENABLE_OCR=false
+# to skip touching OCR models entirely. Default is enabled.
+_ENABLE_OCR = os.getenv("ENABLE_OCR", "true").strip().lower() in {"1", "true", "yes", "on"}
 
-try:
-    import easyocr
-except ImportError:
+# Safe Imports for OCR libraries
+if _ENABLE_OCR:
+    try:
+        from paddleocr import PaddleOCR
+    except ImportError:
+        PaddleOCR = None
+
+    try:
+        import easyocr
+    except ImportError:
+        easyocr = None
+else:
+    PaddleOCR = None
     easyocr = None
 
 
 # ============================================================
 # Database Setup
 # ============================================================
-# Absolute path: prevents CWD hijack when Streamlit is launched elsewhere.
-DB_FILE = str(Path(__file__).resolve().parent / "products.db")
+# Absolute path prevents CWD hijack when Streamlit is launched elsewhere.
+# DB_FILE can be overridden (e.g. Render paid disk mounted at /data).
+DB_FILE = (os.getenv("DB_FILE") or "").strip() or str(Path(__file__).resolve().parent / "products.db")
 
 EXPECTED_COLUMNS = [
     "product_id",
@@ -170,6 +179,8 @@ def optimize_image_for_ocr(image_pil, max_dim=1280):
 @st.cache_resource
 def load_paddleocr():
     """Load high-speed PP-OCRv4 mobile models cached in memory for sub-second CPU inference."""
+    if not _ENABLE_OCR:
+        return None
     if PaddleOCR is not None:
         try:
             return PaddleOCR(
@@ -191,6 +202,8 @@ def load_paddleocr():
 @st.cache_resource
 def load_easyocr_reader():
     """Load cached EasyOCR reader in memory for fast fallback."""
+    if not _ENABLE_OCR:
+        return None
     if easyocr is not None:
         try:
             return easyocr.Reader(["en"], gpu=False)
@@ -274,7 +287,10 @@ def extract_label_values(image_pil):
                 full_text = ""
                 lines = []
     if not full_text and not lines:
-        logger.warning("OCR produced no text; check image quality/model availability.")
+        if not _ENABLE_OCR:
+            logger.warning("OCR disabled via ENABLE_OCR=false; manual entry only.")
+        else:
+            logger.warning("OCR produced no text; check image quality/model availability.")
 
     # ── Pass 1: line-by-line contextual field extraction ──────────────
     fields = {
@@ -318,7 +334,7 @@ def extract_label_values(image_pil):
             if m:
                 fields["country_origin"] = m.group(1).strip()
 
-        # Best Before / Expiry
+        # Best Before / Expiry — line-by-line
         if not fields["expiry"]:
             m = re.search(
                 r"(?:best\s+before|expiry\s*(?:date)?|use\s+by|exp\.?\s*date|exp\.?)[\:\s\.\-]*([a-zA-Z0-9\s/_\.\-]+)",
@@ -326,6 +342,23 @@ def extract_label_values(image_pil):
             if m:
                 val = re.split(r"\b(?:mrp|net\s*wt|lic)\b", m.group(1).strip(), flags=re.IGNORECASE)[0].strip()
                 fields["expiry"] = _clean_expiry_capture(val)
+
+        # If the keyword appeared alone or with trailing punctuation
+        # ("Best" / "before :" / "Expiry:"), look ahead in the next few OCR
+        # lines for the actual duration/date value.
+        if not fields["expiry"] and re.match(
+            r"(?:best\s*before|expiry\s*(?:date)?|use\s*by|exp\.?\s*date|exp\.?)[\:\s\.\-]*$",
+            lc, re.IGNORECASE,
+        ):
+            for lookahead in lines[i + 1 : i + 5]:
+                lf = lookahead.strip()
+                # Skip lines that are obviously other label fields
+                if re.search(r"\b(?:mrp|net|mfg|fssai|lic|country|batch)\b", lf, re.IGNORECASE):
+                    break
+                val = _clean_expiry_capture(lf)
+                if val:
+                    fields["expiry"] = val
+                    break
 
         # Mfg Date
         if not fields["manufacture_date"]:
@@ -392,7 +425,11 @@ def extract_label_values(image_pil):
         fields["country_origin"] = m.group(1).strip() if m else ""
 
     if not fields["expiry"]:
-        m = re.search(r"(?:best\s+before|expiry|use\s+by|exp)[\:\s\.\-]*([a-zA-Z0-9\s/_\.\-]+?)(?=(?:mrp|net|mfg|fssai|lic|country|$))", full_text, re.IGNORECASE)
+        m = re.search(
+            r"(?:best\s+before|expiry\s*(?:date)?|use\s+by|exp(?:iry)?\.?\s*date)[\:\s\.\-]*"
+            r"([a-zA-Z0-9\s/_\.\-]+?)"
+            r"(?=(?:\bmrp\b|\bnet\b|\bmfg\b|\bfssai\b|\blic\b|\bcountry\b|$))",
+            full_text, re.IGNORECASE)
         if m:
             fields["expiry"] = _clean_expiry_capture(m.group(1))
 
@@ -481,13 +518,21 @@ def extract_label_values(image_pil):
             fields["manufacture_date"] = match.group(1)
 
     if not fields["expiry"]:
-        match = re.search(
-            r"\bbest\s+before\b[^0-9]{0,12}(\d+\s+(?:days?|months?|years?)(?:\s+from(?:\s+the\s+date\s+of\s+manufacture)?)?)",
+        # Joined-text recovery for OCR that splits "Best" / "before" / "6" /
+        # "months" into separate text boxes (any typo tolerance on before):
+        m = re.search(
+            r"\bbest\s*befo?re?\b[^0-9]{0,16}"
+            r"(\d+\s*-?\s*(?:days?|months?|years?|yrs?)|[a-zA-Z0-9/_\.\- ]+?)",
             joined_text,
             re.IGNORECASE,
         )
-        if match:
-            fields["expiry"] = match.group(1)
+        if m:
+            val = _clean_expiry_capture(m.group(1))
+            # A bare year ("2026") alone is not a shelf-life/date we can trust.
+            if val and re.fullmatch(r"\d{4}", val):
+                val = ""
+            if val:
+                fields["expiry"] = val
 
     # A label and its contact details are often separate OCR boxes. Replace a
     # punctuation-only capture with the actual phone number and email address.
@@ -1020,6 +1065,8 @@ def render_inspection():
         img_hash = f"{hashlib.md5(img_bytes).hexdigest()}:ocr-v7"
 
         if img_hash != st.session_state.get("ocr_last_hash", ""):
+            if not _ENABLE_OCR:
+                st.info("OCR disabled (ENABLE_OCR=false). Enter fields manually.")
             with st.spinner("Scanning product label with high-speed OCR (< 3s)..."):
                 (
                     name,

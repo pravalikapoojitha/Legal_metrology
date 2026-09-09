@@ -1,0 +1,11 @@
+# Keep build context small and never ship local state/secrets.
+.venv/
+.venv_vlm/
+__pycache__/
+*.pyc
+*.db
+.git/
+.gitignore
+.streamlit/secrets.toml
+.DS_Store
+*.log

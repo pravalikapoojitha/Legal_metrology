@@ -5,10 +5,3 @@ plotly>=5.18,<6
 qrcode[pil]>=7.4,<8
 Pillow>=10.0,<12
 reportlab>=4.0,<5
-# OCR: install only what you use. PaddleOCR is primary, EasyOCR fallback.
-# Heavy deps (~2GB); for lightweight deploys keep one and comment the other.
-paddleocr>=2.7,<3
-paddlepaddle>=2.6,<4
-easyocr>=1.7,<2
-#opencv-contrib-python-headless>=4.8,<5  # uncomment only if you add cv2 preprocessing
-# Removed (unused in app1.py): openai, pyzbar, opencv-contrib-python-headless, json/std-lib cv2 import

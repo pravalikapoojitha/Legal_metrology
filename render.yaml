@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: legal-metrology-app
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: STREAMLIT_SERVER_HEADLESS
+        value: "true"
+      - key: STREAMLIT_SERVER_PORT
+        value: "8501"
+      # The Docker image ships WITHOUT OCR deps (requirements-ocr.txt is heavy,
+      # ~2GB). Keep OCR disabled on the free plan; it degrades gracefully
+      # ("OCR disabled ... enter fields manually").
+      - key: ENABLE_OCR
+        value: "false"
+      # To persist the SQLite catalog across deploys you need a paid-level
+      # Render Disk mounted at /data, then uncomment:
+      # - key: DB_FILE
+      #   value: "/data/products.db"
+      # disk:
+      #   name: data
+      #   mountPath: /data
+      #   sizeGB: 1
+      # SMTP for the "Send PDF by email" feature - set in Render dashboard:
+      # - key: SMTP_HOST
+      # - key: SMTP_PORT
+      # - key: SMTP_USERNAME
+      # - key: SMTP_PASSWORD
+      # - key: SMTP_FROM

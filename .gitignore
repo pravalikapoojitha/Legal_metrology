@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environments
+.venv/
+.venv_vlm/
+venv/
+env/
+
+# Data / runtime artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Secrets
+.streamlit/secrets.toml
+.env
+.env.*
+*.pem
+*.key
+
+# OS / editors
+.DS_Store
+Thumbs.db
