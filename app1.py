@@ -41,9 +41,15 @@ if _ENABLE_OCR:
         import easyocr
     except ImportError:
         easyocr = None
+
+    try:
+        import pytesseract
+    except ImportError:
+        pytesseract = None
 else:
     PaddleOCR = None
     easyocr = None
+    pytesseract = None
 
 
 # ============================================================
@@ -286,6 +292,17 @@ def extract_label_values(image_pil):
                 logger.exception("EasyOCR inference failed: %s", exc)
                 full_text = ""
                 lines = []
+
+    # Option 3: Lightweight system Tesseract fallback for container deploys.
+    if not full_text and pytesseract is not None:
+        try:
+            text = pytesseract.image_to_string(opt_pil, config="--psm 6")
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            full_text = " ".join(lines)
+        except Exception as exc:
+            logger.exception("Tesseract OCR inference failed: %s", exc)
+            full_text = ""
+            lines = []
     if not full_text and not lines:
         if not _ENABLE_OCR:
             logger.warning("OCR disabled via ENABLE_OCR=false; manual entry only.")

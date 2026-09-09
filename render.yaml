@@ -10,11 +10,9 @@ services:
         value: "true"
       - key: STREAMLIT_SERVER_PORT
         value: "8501"
-      # The Docker image ships WITHOUT OCR deps (requirements-ocr.txt is heavy,
-      # ~2GB). Keep OCR disabled on the free plan; it degrades gracefully
-      # ("OCR disabled ... enter fields manually").
+      # Use the lightweight Tesseract OCR path included in the Docker image.
       - key: ENABLE_OCR
-        value: "false"
+        value: "true"
       # To persist the SQLite catalog across deploys you need a paid-level
       # Render Disk mounted at /data, then uncomment:
       # - key: DB_FILE

@@ -2,6 +2,7 @@
 # image builds stay fast and within free-tier memory/time limits.
 # To enable OCR: `pip install -r requirements-ocr.txt` and re-deploy.
 # Even without this, the app runs (scanning will show "no text detected").
-paddleocr>=2.7,<3
+paddleocr>=3.7,<4
 paddlepaddle>=2.6,<4
+paddlex[ocr-core]>=3.7,<4
 easyocr>=1.7,<2

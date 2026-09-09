@@ -5,3 +5,4 @@ plotly>=5.18,<6
 qrcode[pil]>=7.4,<8
 Pillow>=10.0,<12
 reportlab>=4.0,<5
+pytesseract>=0.3.10,<1
